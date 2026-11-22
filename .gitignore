@@ -1,0 +1,9 @@
+*.xcodeproj/
+App/Info.plist
+App/Messenger.entitlements
+build/
+DerivedData/
+.DS_Store
+*.p8
+*.p12
+*.mobileprovision
