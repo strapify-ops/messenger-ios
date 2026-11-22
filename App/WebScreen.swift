@@ -64,6 +64,12 @@ struct WebScreen: UIViewRepresentable {
                 AppDelegate.pendingURL = nil
                 self?.web?.load(URLRequest(url: url))
             })
+            observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.backgroundedAt = Date()
+            })
+            observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.checkOnForeground()
+            })
             observers.append(center.addObserver(forName: .apnsToken, object: nil, queue: .main) { [weak self] note in
                 guard let token = note.userInfo?["token"] as? String else { return }
                 let js = "window.__nativePushToken = \(Coordinator.jsString(token));"
@@ -123,9 +129,43 @@ struct WebScreen: UIViewRepresentable {
             present(message, ok: { completionHandler(true) }, cancel: { completionHandler(false) })
         }
 
-        /// iOS can kill the web content process in the background; come back to a live page.
+        /// iOS can kill the web content process in the background. After that the web view's
+        /// url is often nil, so reload() does nothing and the screen stays white: load the
+        /// last page we know about instead.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            webView.reload()
+            reloadFresh()
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            if let url = webView.url, Config.isOwnHost(url) { lastURL = url }
+        }
+
+        private var lastURL: URL?
+        private var backgroundedAt: Date?
+        private static let staleAfter: TimeInterval = 5 * 60
+
+        private func reloadFresh() {
+            guard let web else { return }
+            web.load(URLRequest(url: lastURL ?? Config.start))
+        }
+
+        /// Back in front: if the page was killed, is blank, or has sat long enough that its
+        /// live connection has likely dropped, load it again.
+        private func checkOnForeground() {
+            guard let web else { return }
+            let away = backgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
+            backgroundedAt = nil
+            if web.url == nil || away > Self.staleAfter { return reloadFresh() }
+            var answered = false
+            web.evaluateJavaScript("document.body ? document.body.children.length : 0") { [weak self] result, error in
+                answered = true
+                let children = (result as? Int) ?? 0
+                if error != nil || children == 0 { self?.reloadFresh() }
+            }
+            // A hung content process never answers.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                if !answered { self?.reloadFresh() }
+            }
         }
 
         private func present(_ message: String, ok: @escaping () -> Void, cancel: (() -> Void)?) {
