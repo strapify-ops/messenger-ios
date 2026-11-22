@@ -18,7 +18,7 @@ jobs:
 
   upload:
     needs: gate
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 40
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
