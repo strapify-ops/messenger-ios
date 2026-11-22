@@ -14,7 +14,7 @@ struct MessengerApp: App {
     var body: some Scene {
         WindowGroup {
             WebScreen()
-                .ignoresSafeArea(.container, edges: .bottom)
+                .ignoresSafeArea()   // full screen on every size, folded or open; the page handles safe areas
         }
     }
 }

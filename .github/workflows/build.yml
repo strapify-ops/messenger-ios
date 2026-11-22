@@ -19,6 +19,12 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Use the newest Xcode (new devices like the Duo only get native layout from the newest SDK)
+        run: |
+          NEWEST=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "Using $NEWEST"
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
+          xcodebuild -version
       - name: Xcode version
         run: xcodebuild -version
       - name: Generate the Xcode project

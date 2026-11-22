@@ -25,9 +25,15 @@ struct WebScreen: UIViewRepresentable {
         web.navigationDelegate = context.coordinator
         web.uiDelegate = context.coordinator
         web.allowsBackForwardNavigationGestures = true
-        let refresh = UIRefreshControl()
-        refresh.addTarget(context.coordinator, action: #selector(Coordinator.reload(_:)), for: .valueChanged)
-        web.scrollView.refreshControl = refresh
+        // Lay out exactly like the Home Screen PWA: the page fills the whole screen and places
+        // itself around the notch, home bar and the Duo's fold/side edges with its own
+        // viewport-fit=cover + env(safe-area-inset-*) CSS. Letting UIKit also inset the scroll
+        // view gave double (or missing) gaps.
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.scrollView.bounces = false          // the messenger scrolls its own panes, like the PWA
+        web.isOpaque = false
+        web.backgroundColor = .systemBackground
+        web.scrollView.backgroundColor = .systemBackground
         context.coordinator.attach(web)
 
         let first = AppDelegate.pendingURL ?? Config.start
@@ -68,11 +74,6 @@ struct WebScreen: UIViewRepresentable {
 
         deinit {
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        }
-
-        @objc func reload(_ sender: UIRefreshControl) {
-            web?.reload()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { sender.endRefreshing() }
         }
 
         /// Own pages stay in the app; Shopify, the CRM, tracking links etc. open in Safari.
