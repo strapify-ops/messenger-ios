@@ -62,13 +62,15 @@ struct WebScreen: UIViewRepresentable {
             observers.append(center.addObserver(forName: .openMessengerURL, object: nil, queue: .main) { [weak self] note in
                 guard let url = note.userInfo?["url"] as? URL else { return }
                 AppDelegate.pendingURL = nil
+                self?.tappedAt = Date()     // this tap owns the screen: no foreground reload over it
                 self?.web?.load(URLRequest(url: url))
             })
             observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
                 self?.backgroundedAt = Date()
             })
             observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.checkOnForeground()
+                // A notification tap is delivered just after this; give it a moment to claim the screen.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.checkOnForeground() }
             })
             observers.append(center.addObserver(forName: .apnsToken, object: nil, queue: .main) { [weak self] note in
                 guard let token = note.userInfo?["token"] as? String else { return }
@@ -137,16 +139,29 @@ struct WebScreen: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            if let url = webView.url, Config.isOwnHost(url) { lastURL = url }
+            if let url = webView.url, Config.isOwnHost(url) { lastURL = Self.withoutMessage(url) }
+        }
+
+        /// A notification link carries &m=<message id> so the tap lands on that message. Kept as
+        /// "the page to come back to", it made every later reload jump back to that OLD message.
+        /// Remember the conversation only (the page itself also drops m once it has jumped).
+        static func withoutMessage(_ url: URL) -> URL {
+            guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+            let kept = (parts.queryItems ?? []).filter { $0.name != "m" }
+            parts.queryItems = kept.isEmpty ? nil : kept
+            return parts.url ?? url
         }
 
         private var lastURL: URL?
         private var backgroundedAt: Date?
+        private var tappedAt: Date?
         private static let staleAfter: TimeInterval = 5 * 60
 
         private func reloadFresh() {
             guard let web else { return }
-            web.load(URLRequest(url: lastURL ?? Config.start))
+            // Prefer where the page is NOW (it rewrites its address to ?c=<open chat> as you move).
+            let here = web.url.flatMap { Config.isOwnHost($0) ? Self.withoutMessage($0) : nil }
+            web.load(URLRequest(url: here ?? lastURL ?? Config.start))
         }
 
         /// Back in front: if the page was killed, is blank, or has sat long enough that its
@@ -155,6 +170,7 @@ struct WebScreen: UIViewRepresentable {
             guard let web else { return }
             let away = backgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
             backgroundedAt = nil
+            if let tappedAt, Date().timeIntervalSince(tappedAt) < 5 { return }   // a tap already loaded fresh
             if web.url == nil || away > Self.staleAfter { return reloadFresh() }
             var answered = false
             web.evaluateJavaScript("document.body ? document.body.children.length : 0") { [weak self] result, error in
